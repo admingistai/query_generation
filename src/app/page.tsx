@@ -15,6 +15,7 @@ import {
   ICP_GENERATOR_SYSTEM_PROMPT,
   QUERY_GENERATOR_SYSTEM_PROMPT,
 } from "@/lib/prompts";
+import { downloadExport, type ExportFormat } from "@/lib/export";
 
 interface PairingResult {
   topic: string;
@@ -231,24 +232,21 @@ export default function Home() {
     }
   }, [urls, topicPrompt, icpPrompt, queryPrompt]);
 
-  const handleExport = useCallback(() => {
-    const data = {
-      brandAnalysis,
-      topics,
-      icps,
-      pairings,
-      exportedAt: new Date().toISOString(),
-    };
-    const blob = new Blob([JSON.stringify(data, null, 2)], {
-      type: "application/json",
-    });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `query-generation-${Date.now()}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }, [brandAnalysis, topics, icps, pairings]);
+  const handleExport = useCallback(
+    (format: ExportFormat) => {
+      downloadExport(
+        {
+          brandAnalysis,
+          topics,
+          icps,
+          pairings,
+          exportedAt: new Date().toISOString(),
+        },
+        format
+      );
+    },
+    [brandAnalysis, topics, icps, pairings]
+  );
 
   return (
     <div className="h-screen flex flex-col">

@@ -3,10 +3,17 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { TopicsList } from "./TopicsList";
 import { IcpsList } from "./IcpsList";
 import { PairingsTable } from "./PairingsTable";
-import { Download } from "lucide-react";
+import { Download, ChevronDown } from "lucide-react";
+import type { ExportFormat } from "@/lib/export";
 
 interface PairingResult {
   topic: string;
@@ -25,7 +32,7 @@ interface ResultsPanelProps {
   icps: string[];
   pairings: PairingResult[];
   progress: number;
-  onExport: () => void;
+  onExport: (format: ExportFormat) => void;
 }
 
 const stageLabels = {
@@ -35,6 +42,12 @@ const stageLabels = {
   icps: "Generating ICPs...",
   queries: "Generating Queries...",
   complete: "Complete",
+};
+
+const formatLabels: Record<ExportFormat, string> = {
+  json: "JSON",
+  csv: "CSV",
+  xlsx: "Excel (XLSX)",
 };
 
 export function ResultsPanel({
@@ -54,10 +67,22 @@ export function ResultsPanel({
       <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
         <CardTitle>Results</CardTitle>
         {stage === "complete" && hasResults && (
-          <Button variant="outline" size="sm" onClick={onExport}>
-            <Download className="h-4 w-4 mr-2" />
-            Export JSON
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm">
+                <Download className="h-4 w-4 mr-2" />
+                Export
+                <ChevronDown className="h-4 w-4 ml-2" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              {(Object.keys(formatLabels) as ExportFormat[]).map((format) => (
+                <DropdownMenuItem key={format} onClick={() => onExport(format)}>
+                  {formatLabels[format]}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
         )}
       </CardHeader>
       <CardContent className="flex-1 space-y-4 overflow-auto">
