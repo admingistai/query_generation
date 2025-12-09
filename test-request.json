@@ -1,0 +1,11 @@
+{
+  "messages": [
+    {
+      "parts": [{"type": "text", "text": "Start"}],
+      "id": "test-123",
+      "role": "user"
+    }
+  ],
+  "icpPersona": "A first-time homebuyer in their 30s looking for home insurance options",
+  "initialQuery": "What should I know about home insurance?"
+}

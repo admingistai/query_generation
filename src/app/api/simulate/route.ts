@@ -1,7 +1,12 @@
 import { openai, type OpenAIResponsesProviderOptions } from "@ai-sdk/openai";
 import { streamText, tool, convertToModelMessages, generateText, generateObject, stepCountIs } from "ai";
 import { z } from "zod";
-import { createSimulatorSystemPrompt, JourneyPhase, JourneyContext, createEmptyContext } from "@/lib/agents/userSimulatorAgent";
+import {
+  createSimulatorSystemPrompt,
+  JourneyPhase,
+  JourneyContext,
+  createEmptyContext,
+} from "@/lib/agents/userSimulatorAgent";
 
 export const maxDuration = 120; // Allow longer simulations
 
@@ -214,13 +219,13 @@ Phase guidance: ${phaseGuidance[phase]}`,
 
     const result = streamText({
       model: openai(model),
-      system: createSimulatorSystemPrompt(icpPersona, initialQuery),
+      system: createSimulatorSystemPrompt(icpPersona, initialQuery, journeyContext),
       messages: modelMessages,
       tools: simulationTools,
       // Use stopWhen with stepCountIs as a safety limit (AI SDK v5 pattern)
       // Combined with custom activation check via array of conditions
       stopWhen: [
-        stepCountIs(15), // Increased safety limit for 11-step flow with entity extraction
+        stepCountIs(15), // Safety limit for 11-step flow
         // Custom condition: stop when activation phase is complete
         ({ steps }) => {
           return steps.some((step) =>

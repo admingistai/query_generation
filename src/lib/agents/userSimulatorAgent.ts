@@ -5,6 +5,129 @@ import { z } from "zod";
 // Types for simulation
 export type JourneyPhase = "discovery" | "consideration" | "activation";
 
+// ============================================================================
+// PERSONA CONSTRAINT TYPES & SCHEMAS
+// ============================================================================
+
+// Budget level classification
+export type BudgetLevel = "ultra-budget" | "budget" | "mid-range" | "premium" | "luxury";
+
+// Price sensitivity classification
+export type PriceSensitivity = "very-high" | "high" | "medium" | "low";
+
+// Decision style classification
+export type DecisionStyle = "impulsive" | "research-heavy" | "balanced";
+
+// Risk tolerance classification
+export type RiskTolerance = "low" | "medium" | "high";
+
+// Persona constraints extracted from ICP description
+export interface PersonaConstraints {
+  // Budget constraints
+  budgetLevel: BudgetLevel;
+  priceRange?: {
+    min?: number;
+    max?: number;
+    currency: string;
+  };
+  priceSensitivity: PriceSensitivity;
+
+  // Preferences
+  mustHaves: string[];
+  niceToHaves: string[];
+  dealBreakers: string[];
+
+  // Values & lifestyle
+  values: string[];
+  avoids: string[];
+
+  // Decision behavior
+  decisionStyle: DecisionStyle;
+  riskTolerance: RiskTolerance;
+
+  // Optional context
+  travelStyle?: string;
+  experienceLevel?: string;
+  primaryGoal?: string;
+}
+
+// Zod schema for PersonaConstraints
+export const PersonaConstraintsSchema = z.object({
+  budgetLevel: z.enum(["ultra-budget", "budget", "mid-range", "premium", "luxury"]),
+  priceRange: z.object({
+    min: z.number().optional(),
+    max: z.number().optional(),
+    currency: z.string(),
+  }).optional(),
+  priceSensitivity: z.enum(["very-high", "high", "medium", "low"]),
+  mustHaves: z.array(z.string()),
+  niceToHaves: z.array(z.string()),
+  dealBreakers: z.array(z.string()),
+  values: z.array(z.string()),
+  avoids: z.array(z.string()),
+  decisionStyle: z.enum(["impulsive", "research-heavy", "balanced"]),
+  riskTolerance: z.enum(["low", "medium", "high"]),
+  travelStyle: z.string().optional(),
+  experienceLevel: z.string().optional(),
+  primaryGoal: z.string().optional(),
+});
+
+// Score for a single option against persona constraints
+export interface OptionScore {
+  option: string;
+  budgetScore: number;        // 0-10, how well price fits budget
+  valuesScore: number;        // 0-10, alignment with persona values
+  dealBreakerFail: boolean;   // true = automatic disqualification
+  mustHavesMet: number;       // 0-100, percentage of must-haves satisfied
+  overallFit: number;         // weighted composite score
+  reasoning: string;          // explanation of the score
+}
+
+// Zod schema for OptionScore
+export const OptionScoreSchema = z.object({
+  option: z.string(),
+  budgetScore: z.number().min(0).max(10),
+  valuesScore: z.number().min(0).max(10),
+  dealBreakerFail: z.boolean(),
+  mustHavesMet: z.number().min(0).max(100),
+  overallFit: z.number().min(0).max(10),
+  reasoning: z.string(),
+});
+
+// Result of decision validation
+export interface ValidationResult {
+  isValid: boolean;
+  issues: string[];
+  suggestion?: string;
+}
+
+// Zod schema for ValidationResult
+export const ValidationResultSchema = z.object({
+  isValid: z.boolean(),
+  issues: z.array(z.string()),
+  suggestion: z.string().optional(),
+});
+
+// High-fit options tracked during simulation
+export interface HighFitOption {
+  name: string;
+  score: number;
+  phase: JourneyPhase;
+}
+
+// Create empty persona constraints with defaults
+export const createEmptyPersonaConstraints = (): PersonaConstraints => ({
+  budgetLevel: "mid-range",
+  priceSensitivity: "medium",
+  mustHaves: [],
+  niceToHaves: [],
+  dealBreakers: [],
+  values: [],
+  avoids: [],
+  decisionStyle: "balanced",
+  riskTolerance: "medium",
+});
+
 export interface SimulationConfig {
   icpPersona: string;
   initialQuery: string;
@@ -70,6 +193,22 @@ export function createSimulatorSystemPrompt(
 **YOUR IDENTITY:**
 ${icpPersona}
 
+**CRITICAL PERSONA FIDELITY RULES:**
+Before EVERY query and decision, ask yourself:
+1. "Would this person ACTUALLY search for this?"
+2. "Would this person ACTUALLY choose this option?"
+3. "Does this match their budget/values/lifestyle?"
+
+NEVER recommend or choose options that conflict with the persona's:
+- Budget level (don't suggest luxury to budget personas, don't suggest cheap to luxury personas)
+- Values (don't suggest touristy spots to authentic-experience seekers)
+- Lifestyle (don't suggest formal dining to casual travelers, party hostels to families)
+
+Examples of persona-appropriate behavior:
+- A backpacker on $30/day would NEVER choose "The Embassy Hotel with elegant buffet dinners"
+- A luxury business traveler would NEVER choose a hostel dormitory
+- A family with kids would NEVER choose a party hostel
+
 **YOUR SITUATION:**
 You are researching a topic that matters to you. You will ask questions naturally, as this person would.
 ${initialQuery ? `Your starting question is: "${initialQuery}"` : ''}
@@ -80,55 +219,51 @@ You will progress through 3 stages of a natural customer journey:
 **DISCOVERY (Early Intent)** - Ask 1-2 queries
 - You're exploring a problem, goal, or curiosity
 - You are NOT yet aware of specific products or brands
-- Ask informational, open-ended questions
+- Ask informational, open-ended questions using language appropriate to YOUR persona
 - Do NOT mention brand names yet
-- Example: "What are the best options for X?" or "What should I consider when looking for Y?"
+- Use vocabulary that matches your persona (budget personas say "cheap/affordable", luxury personas say "best/premium")
 
 **CONSIDERATION (Mid Intent)** - Ask 1-2 queries
 - You now understand the category and want to compare options
 - Ask comparative, evaluative questions about features
 - Focus on what matters to YOU based on your persona
-- IMPORTANT: Reference specific products/brands from the AI responses you received in Discovery
-- Example: "How does [Product A from discovery] compare to [Product B]?"
+- IMPORTANT: Only compare options that fit your persona - mentally filter out anything that doesn't match your budget/values
+- If the AI suggests options that don't fit you, ignore them and ask about appropriate alternatives
 
 **ACTIVATION (High Intent)** - Ask 1 query
 - You're ready to buy and want to take action
 - Ask about availability, prices, where to purchase
-- IMPORTANT: Name the specific product you've decided on based on your Consideration phase
-- Example: "Where can I buy [specific product you chose] at the best price?"
+- Name the specific product you've decided on
+- FINAL CHECK: Your choice MUST make sense for who you are - if you're a backpacker, you're choosing a hostel, not a luxury hotel
 
-**MANDATORY EXECUTION FLOW - YOU MUST EXECUTE ALL 11 STEPS:**
+**MANDATORY EXECUTION FLOW - YOU MUST EXECUTE ALL STEPS:**
 
-You will make EXACTLY 11 tool calls in this order. After each tool result, IMMEDIATELY make the next tool call. DO NOT output any text between tool calls.
+You will make tool calls in this order. After each tool result, IMMEDIATELY make the next tool call. DO NOT output any text between tool calls.
 
-STEP 1: sendQuery(query="[your discovery question based on initialQuery]", phase="discovery")
-STEP 2: extractEntities(response="[copy the response text from step 1]", phase="discovery")
-STEP 3: sendQuery(query="[follow-up discovery question - MUST reference something specific from step 1's response]", phase="discovery")
-STEP 4: extractEntities(response="[copy the response text from step 3]", phase="discovery")
-STEP 5: recordPhaseCompletion(phase="discovery", insightsGathered=["insight 1", "insight 2"])
-STEP 6: sendQuery(query="[consideration question - MUST compare specific products by name from discovery]", phase="consideration")
-STEP 7: extractEntities(response="[copy the response text from step 6]", phase="consideration")
-STEP 8: sendQuery(query="[follow-up consideration - drill deeper into the comparison]", phase="consideration")
-STEP 9: recordPhaseCompletion(phase="consideration", insightsGathered=["insight 1", "insight 2"])
-STEP 10: sendQuery(query="[activation - MUST name the specific product you prefer and ask where to buy]", phase="activation")
-STEP 11: recordPhaseCompletion(phase="activation", insightsGathered=["final decision insight"])
+STEP 1: sendQuery(query="[your discovery question]", phase="discovery")
+STEP 2: extractEntities(response="[response text]", phase="discovery")
+STEP 3: sendQuery(query="[follow-up discovery - reference entities]", phase="discovery")
+STEP 4: extractEntities(response="[response text]", phase="discovery")
+STEP 5: recordPhaseCompletion(phase="discovery", insightsGathered=[...])
+STEP 6: sendQuery(query="[consideration - compare persona-appropriate options]", phase="consideration")
+STEP 7: extractEntities(response="[response text]", phase="consideration")
+STEP 8: sendQuery(query="[follow-up consideration]", phase="consideration")
+STEP 9: recordPhaseCompletion(phase="consideration", insightsGathered=[...])
+STEP 10: sendQuery(query="[activation - name your chosen product]", phase="activation")
+STEP 11: recordPhaseCompletion(phase="activation", insightsGathered=["final decision"])
 
 **ABSOLUTE REQUIREMENTS:**
-1. You MUST make ALL 11 tool calls - no exceptions
+1. You MUST make ALL tool calls - no exceptions
 2. After receiving a tool result, IMMEDIATELY call the next tool - no text output
-3. The ONLY text you may output is AFTER completing all 11 steps
-4. If you output text before step 11, you have FAILED your task
-5. Stay in character as your persona for all queries
-6. CRITICAL: Each query after step 1 MUST reference specific entities from previous responses
-7. Discovery Q2 must reference something from Q1's response
-8. Consideration queries must mention specific products by name
-9. Activation query must name your chosen product
+3. Stay DEEPLY in character as your persona for all queries
+4. Your final choice MUST align with your persona - a backpacker chooses budget options, a luxury traveler chooses premium options
 
 **ANTI-PATTERNS TO AVOID:**
-❌ Asking "what should I consider" twice
-❌ Generic questions like "where can I buy X" without specifying what X is
-❌ Ignoring specific recommendations from previous responses
-❌ Repeating questions with slightly different wording
+❌ A budget persona choosing expensive/luxury options
+❌ A luxury persona choosing cheap/budget options
+❌ Using language that doesn't match your persona
+❌ Picking the "objectively best" option instead of the best FOR YOUR PERSONA
+❌ Ignoring your persona's constraints when making the final decision
 
 **BEGIN IMMEDIATELY:** Call sendQuery with your first discovery question now.`;
 }
