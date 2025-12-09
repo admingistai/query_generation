@@ -1,7 +1,7 @@
 import { openai, type OpenAIResponsesProviderOptions } from "@ai-sdk/openai";
-import { streamText, tool, convertToModelMessages, generateText, stepCountIs } from "ai";
+import { streamText, tool, convertToModelMessages, generateText, generateObject, stepCountIs } from "ai";
 import { z } from "zod";
-import { createSimulatorSystemPrompt, JourneyPhase } from "@/lib/agents/userSimulatorAgent";
+import { createSimulatorSystemPrompt, JourneyPhase, JourneyContext, createEmptyContext } from "@/lib/agents/userSimulatorAgent";
 
 export const maxDuration = 120; // Allow longer simulations
 
@@ -46,6 +46,9 @@ export async function POST(request: Request) {
     // Track completed phases
     const completedPhases: Set<JourneyPhase> = new Set();
 
+    // Track accumulated journey context for entity extraction
+    const journeyContext: JourneyContext = createEmptyContext();
+
     // Convert messages from UI format to model format
     const modelMessages = convertToModelMessages(messages);
 
@@ -62,6 +65,9 @@ export async function POST(request: Request) {
         }),
         execute: async ({ query, phase }) => {
           console.log(`Tool: sendQuery - Phase: ${phase}, Query: ${query}`);
+
+          // Track the query in context to prevent repetition
+          journeyContext.previousQueries.push(query);
 
           // Generate realistic AI search response using LLM with web search
           const phaseGuidance: Record<JourneyPhase, string> = {
@@ -136,6 +142,74 @@ Phase guidance: ${phaseGuidance[phase]}`,
           };
         },
       }),
+
+      extractEntities: tool({
+        description:
+          "Extract key entities from the AI response to build context for follow-up queries. Call this after each sendQuery to analyze what was mentioned.",
+        inputSchema: z.object({
+          response: z.string().describe("The AI response text to analyze"),
+          phase: z
+            .enum(["discovery", "consideration", "activation"])
+            .describe("The current journey phase"),
+        }),
+        execute: async ({ response, phase }) => {
+          console.log(`Tool: extractEntities - Phase: ${phase}, Response length: ${response.length}`);
+
+          try {
+            const { object } = await generateObject({
+              model: openai("gpt-4o-mini"),
+              schema: z.object({
+                products: z.array(z.string()).describe("Specific products or brand names mentioned"),
+                features: z.array(z.string()).describe("Features, attributes, or characteristics discussed"),
+                comparisons: z.array(z.string()).describe("Any comparisons made (e.g., 'German vs Japanese knives')"),
+                recommendations: z.array(z.string()).describe("Specific recommendations or suggestions"),
+                priceRanges: z.array(z.string()).describe("Price points, ranges, or budget info mentioned"),
+              }),
+              prompt: `Extract key entities from this ${phase} phase AI search response. Be specific - extract exact product names, brand names, and specific features mentioned:\n\n${response}`,
+            });
+
+            // Accumulate entities into journey context
+            journeyContext.specificProducts.push(...object.products);
+            journeyContext.entitiesDiscovered.push(...object.products, ...object.features);
+            journeyContext.comparisonsExplored.push(...object.comparisons);
+            journeyContext.priceRangesFound.push(...object.priceRanges);
+
+            console.log(`Tool: extractEntities - Extracted:`, {
+              products: object.products.length,
+              features: object.features.length,
+              comparisons: object.comparisons.length,
+              recommendations: object.recommendations.length,
+              priceRanges: object.priceRanges.length,
+            });
+
+            return {
+              phase,
+              extracted: object,
+              accumulatedContext: {
+                totalProducts: journeyContext.specificProducts.length,
+                totalComparisons: journeyContext.comparisonsExplored.length,
+              },
+            };
+          } catch (error) {
+            console.error("extractEntities error:", error);
+            // Return empty extraction on error to not break the flow
+            return {
+              phase,
+              extracted: {
+                products: [],
+                features: [],
+                comparisons: [],
+                recommendations: [],
+                priceRanges: [],
+              },
+              accumulatedContext: {
+                totalProducts: journeyContext.specificProducts.length,
+                totalComparisons: journeyContext.comparisonsExplored.length,
+              },
+            };
+          }
+        },
+      }),
     };
 
     const result = streamText({
@@ -146,7 +220,7 @@ Phase guidance: ${phaseGuidance[phase]}`,
       // Use stopWhen with stepCountIs as a safety limit (AI SDK v5 pattern)
       // Combined with custom activation check via array of conditions
       stopWhen: [
-        stepCountIs(10), // Safety limit
+        stepCountIs(15), // Increased safety limit for 11-step flow with entity extraction
         // Custom condition: stop when activation phase is complete
         ({ steps }) => {
           return steps.some((step) =>

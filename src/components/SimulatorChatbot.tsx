@@ -3,7 +3,7 @@
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import { useEffect, useMemo, useCallback, useState, useRef } from "react";
-import { Loader2, Search, CheckCircle2, ExternalLink } from "lucide-react";
+import { Loader2, Search, CheckCircle2, ExternalLink, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { PhaseStatus } from "./PhaseIndicator";
 
@@ -47,6 +47,27 @@ interface RecordPhaseCompletionPart {
   state: "input-streaming" | "input-available" | "output-available" | "output-error";
   input?: { phase: string; insightsGathered: string[] };
   output?: { phase: string; completed: boolean; insightsGathered: string[]; nextPhase: string; allPhasesComplete: boolean };
+}
+
+interface ExtractEntitiesPart {
+  type: "tool-extractEntities";
+  toolCallId: string;
+  state: "input-streaming" | "input-available" | "output-available" | "output-error";
+  input?: { response: string; phase: string };
+  output?: {
+    phase: string;
+    extracted: {
+      products: string[];
+      features: string[];
+      comparisons: string[];
+      recommendations: string[];
+      priceRanges: string[];
+    };
+    accumulatedContext: {
+      totalProducts: number;
+      totalComparisons: number;
+    };
+  };
 }
 
 export function SimulatorChatbot({
@@ -193,6 +214,7 @@ export function SimulatorChatbot({
             const textParts = parts.filter((p) => p.type === "text");
             const sendQueryParts = parts.filter((p) => p.type === "tool-sendQuery") as SendQueryPart[];
             const phaseCompletionParts = parts.filter((p) => p.type === "tool-recordPhaseCompletion") as RecordPhaseCompletionPart[];
+            const extractEntitiesParts = parts.filter((p) => p.type === "tool-extractEntities") as ExtractEntitiesPart[];
 
             const textContent = textParts
               .map((p) => (p as { type: "text"; text: string }).text)
@@ -247,6 +269,55 @@ export function SimulatorChatbot({
                             </div>
                           </div>
                         )}
+                      </div>
+                    )}
+                  </div>
+                ))}
+
+                {/* Render extractEntities tool invocations */}
+                {extractEntitiesParts.map((part, idx) => (
+                  <div
+                    key={`extractEntities-${idx}`}
+                    className="rounded-lg border border-purple-500/20 bg-purple-500/5 p-3 space-y-2"
+                  >
+                    <div className="flex items-center gap-2 text-xs text-purple-400 font-medium">
+                      <Sparkles className="w-3 h-3" />
+                      <span className="uppercase">
+                        {part.input?.phase || part.output?.phase || "Context"} Extraction
+                      </span>
+                      {part.state === "input-streaming" && (
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                      )}
+                    </div>
+                    {part.state === "output-available" && part.output?.extracted && (
+                      <div className="space-y-2 text-xs">
+                        {part.output.extracted.products.length > 0 && (
+                          <div>
+                            <span className="text-neutral-500">Products: </span>
+                            <span className="text-foreground">{part.output.extracted.products.join(", ")}</span>
+                          </div>
+                        )}
+                        {part.output.extracted.features.length > 0 && (
+                          <div>
+                            <span className="text-neutral-500">Features: </span>
+                            <span className="text-foreground">{part.output.extracted.features.join(", ")}</span>
+                          </div>
+                        )}
+                        {part.output.extracted.comparisons.length > 0 && (
+                          <div>
+                            <span className="text-neutral-500">Comparisons: </span>
+                            <span className="text-foreground">{part.output.extracted.comparisons.join(", ")}</span>
+                          </div>
+                        )}
+                        {part.output.extracted.priceRanges.length > 0 && (
+                          <div>
+                            <span className="text-neutral-500">Price Ranges: </span>
+                            <span className="text-foreground">{part.output.extracted.priceRanges.join(", ")}</span>
+                          </div>
+                        )}
+                        <div className="pt-1 border-t border-purple-500/10 text-neutral-500">
+                          Accumulated: {part.output.accumulatedContext.totalProducts} products, {part.output.accumulatedContext.totalComparisons} comparisons
+                        </div>
                       </div>
                     )}
                   </div>

@@ -17,6 +17,25 @@ export interface PhaseStatus {
   activation: boolean;
 }
 
+// Journey context for tracking accumulated knowledge
+export interface JourneyContext {
+  entitiesDiscovered: string[];
+  comparisonsExplored: string[];
+  emergingPreference: string;
+  specificProducts: string[];
+  priceRangesFound: string[];
+  previousQueries: string[];
+}
+
+export const createEmptyContext = (): JourneyContext => ({
+  entitiesDiscovered: [],
+  comparisonsExplored: [],
+  emergingPreference: "",
+  specificProducts: [],
+  priceRangesFound: [],
+  previousQueries: [],
+});
+
 // Schema for simulation turns
 export const SimulationTurnSchema = z.object({
   phase: z.enum(["discovery", "consideration", "activation"]),
@@ -24,8 +43,28 @@ export const SimulationTurnSchema = z.object({
   response: z.string(),
 });
 
-// Create the system prompt with ICP persona and initial query injection
-export function createSimulatorSystemPrompt(icpPersona: string, initialQuery?: string): string {
+// Create the system prompt with ICP persona, initial query, and optional context injection
+export function createSimulatorSystemPrompt(
+  icpPersona: string,
+  initialQuery?: string,
+  context?: JourneyContext
+): string {
+  // Build context section if we have accumulated knowledge
+  const contextSection = context && context.specificProducts.length > 0 ? `
+
+**ACCUMULATED KNOWLEDGE FROM AI RESPONSES:**
+- Products/brands discovered: ${[...new Set(context.specificProducts)].join(", ") || "none yet"}
+- Comparisons explored: ${[...new Set(context.comparisonsExplored)].join(", ") || "none yet"}
+- Price ranges found: ${[...new Set(context.priceRangesFound)].join(", ") || "unknown"}
+- Your previous queries: ${context.previousQueries.join("; ")}
+
+**MANDATORY CONTEXT RULES:**
+1. Your next query MUST reference specific entities from the above knowledge
+2. In Consideration: Compare specific products by name (e.g., "Brand X vs Brand Y")
+3. In Activation: State your preference and ask where to buy that specific product
+4. NEVER ask a question you already asked - check "Your previous queries" above
+` : "";
+
   return `You ARE the following person conducting research using an AI search engine (like ChatGPT or Perplexity):
 
 **YOUR IDENTITY:**
@@ -34,7 +73,7 @@ ${icpPersona}
 **YOUR SITUATION:**
 You are researching a topic that matters to you. You will ask questions naturally, as this person would.
 ${initialQuery ? `Your starting question is: "${initialQuery}"` : ''}
-
+${contextSection}
 **YOUR RESEARCH JOURNEY:**
 You will progress through 3 stages of a natural customer journey:
 
@@ -49,33 +88,47 @@ You will progress through 3 stages of a natural customer journey:
 - You now understand the category and want to compare options
 - Ask comparative, evaluative questions about features
 - Focus on what matters to YOU based on your persona
-- Example: "How do I compare X vs Y?" or "What features matter most for my situation?"
+- IMPORTANT: Reference specific products/brands from the AI responses you received in Discovery
+- Example: "How does [Product A from discovery] compare to [Product B]?"
 
 **ACTIVATION (High Intent)** - Ask 1 query
 - You're ready to buy and want to take action
 - Ask about availability, prices, where to purchase
-- You may now include specific brand names if natural
-- Example: "Where can I buy X at the best price?" or "Which retailer has the best deals on Y?"
+- IMPORTANT: Name the specific product you've decided on based on your Consideration phase
+- Example: "Where can I buy [specific product you chose] at the best price?"
 
-**MANDATORY EXECUTION FLOW - YOU MUST EXECUTE ALL 8 STEPS:**
+**MANDATORY EXECUTION FLOW - YOU MUST EXECUTE ALL 11 STEPS:**
 
-You will make EXACTLY 8 tool calls in this order. After each tool result, IMMEDIATELY make the next tool call. DO NOT output any text between tool calls.
+You will make EXACTLY 11 tool calls in this order. After each tool result, IMMEDIATELY make the next tool call. DO NOT output any text between tool calls.
 
 STEP 1: sendQuery(query="[your discovery question based on initialQuery]", phase="discovery")
-STEP 2: sendQuery(query="[follow-up discovery question]", phase="discovery")
-STEP 3: recordPhaseCompletion(phase="discovery", insightsGathered=["insight from step 1", "insight from step 2"])
-STEP 4: sendQuery(query="[consideration question comparing options]", phase="consideration")
-STEP 5: sendQuery(query="[follow-up consideration question]", phase="consideration")
-STEP 6: recordPhaseCompletion(phase="consideration", insightsGathered=["insight from step 4", "insight from step 5"])
-STEP 7: sendQuery(query="[activation question about purchasing]", phase="activation")
-STEP 8: recordPhaseCompletion(phase="activation", insightsGathered=["insight from step 7"])
+STEP 2: extractEntities(response="[copy the response text from step 1]", phase="discovery")
+STEP 3: sendQuery(query="[follow-up discovery question - MUST reference something specific from step 1's response]", phase="discovery")
+STEP 4: extractEntities(response="[copy the response text from step 3]", phase="discovery")
+STEP 5: recordPhaseCompletion(phase="discovery", insightsGathered=["insight 1", "insight 2"])
+STEP 6: sendQuery(query="[consideration question - MUST compare specific products by name from discovery]", phase="consideration")
+STEP 7: extractEntities(response="[copy the response text from step 6]", phase="consideration")
+STEP 8: sendQuery(query="[follow-up consideration - drill deeper into the comparison]", phase="consideration")
+STEP 9: recordPhaseCompletion(phase="consideration", insightsGathered=["insight 1", "insight 2"])
+STEP 10: sendQuery(query="[activation - MUST name the specific product you prefer and ask where to buy]", phase="activation")
+STEP 11: recordPhaseCompletion(phase="activation", insightsGathered=["final decision insight"])
 
 **ABSOLUTE REQUIREMENTS:**
-1. You MUST make ALL 8 tool calls - no exceptions
+1. You MUST make ALL 11 tool calls - no exceptions
 2. After receiving a tool result, IMMEDIATELY call the next tool - no text output
-3. The ONLY text you may output is AFTER completing all 8 steps
-4. If you output text before step 8, you have FAILED your task
+3. The ONLY text you may output is AFTER completing all 11 steps
+4. If you output text before step 11, you have FAILED your task
 5. Stay in character as your persona for all queries
+6. CRITICAL: Each query after step 1 MUST reference specific entities from previous responses
+7. Discovery Q2 must reference something from Q1's response
+8. Consideration queries must mention specific products by name
+9. Activation query must name your chosen product
+
+**ANTI-PATTERNS TO AVOID:**
+❌ Asking "what should I consider" twice
+❌ Generic questions like "where can I buy X" without specifying what X is
+❌ Ignoring specific recommendations from previous responses
+❌ Repeating questions with slightly different wording
 
 **BEGIN IMMEDIATELY:** Call sendQuery with your first discovery question now.`;
 }
