@@ -63,28 +63,44 @@ export async function POST(request: Request) {
         execute: async ({ query, phase }) => {
           console.log(`Tool: sendQuery - Phase: ${phase}, Query: ${query}`);
 
-          // Generate realistic AI search response using LLM
+          // Generate realistic AI search response using LLM with web search
           const phaseGuidance: Record<JourneyPhase, string> = {
             discovery: "The user is in early research. Provide helpful informational content. Do NOT mention specific brand names - focus on general categories, features to consider, and educational information.",
             consideration: "The user is comparing options. Provide balanced comparisons of different types/categories. You may mention general characteristics but avoid specific brand endorsements.",
             activation: "The user is ready to buy. Provide specific, actionable recommendations including where to purchase, price ranges, and specific product suggestions if helpful.",
           };
 
-          const { text } = await generateText({
+          const { text, sources } = await generateText({
             model: openai("gpt-4o-mini"),
-            system: `You are an AI search engine like ChatGPT or Perplexity. Respond helpfully and naturally to user queries.
-
+            system: `You are an AI search engine like ChatGPT or Perplexity with live web access.
+Run focused searches and use the most relevant pages so your response reflects the latest information.
 Keep responses concise - 2-3 short paragraphs maximum.
 Be conversational and helpful, like a knowledgeable friend.
+Reference supporting sources naturally in your response.
 
 Phase guidance: ${phaseGuidance[phase]}`,
             prompt: query,
+            tools: {
+              web_search: openai.tools.webSearch({
+                userLocation: { type: "approximate", country: "US" },
+              }),
+            },
+            toolChoice: { type: "tool", toolName: "web_search" },
           });
+
+          // Extract citation URLs from sources
+          const citations = sources
+            .filter((source) => source.sourceType === "url")
+            .map((source) => ({
+              url: source.url,
+              title: source.title || source.url,
+            }));
 
           return {
             query,
             phase,
             response: text,
+            citations,
             timestamp: new Date().toISOString(),
           };
         },

@@ -3,7 +3,7 @@
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import { useEffect, useMemo, useCallback, useState, useRef } from "react";
-import { Loader2, Search, CheckCircle2 } from "lucide-react";
+import { Loader2, Search, CheckCircle2, ExternalLink } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { PhaseStatus } from "./PhaseIndicator";
 
@@ -32,7 +32,13 @@ interface SendQueryPart {
   toolCallId: string;
   state: "input-streaming" | "input-available" | "output-available" | "output-error";
   input?: { query: string; phase: string };
-  output?: { query: string; phase: string; response: string; timestamp: string };
+  output?: {
+    query: string;
+    phase: string;
+    response: string;
+    timestamp: string;
+    citations?: Array<{ url: string; title: string }>;
+  };
 }
 
 interface RecordPhaseCompletionPart {
@@ -218,6 +224,29 @@ export function SimulatorChatbot({
                           AI Response:
                         </span>
                         {part.output.response}
+
+                        {/* Render citations if available */}
+                        {part.output.citations && part.output.citations.length > 0 && (
+                          <div className="mt-3 pt-2 border-t border-blue-500/10">
+                            <span className="text-xs text-neutral-500 block mb-2">
+                              Sources ({part.output.citations.length}):
+                            </span>
+                            <div className="flex flex-col gap-1">
+                              {part.output.citations.map((citation, i) => (
+                                <a
+                                  key={i}
+                                  href={citation.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-xs text-blue-400 hover:text-blue-300 hover:underline flex items-center gap-1 truncate"
+                                >
+                                  <ExternalLink className="w-3 h-3 flex-shrink-0" />
+                                  <span className="truncate">{citation.title}</span>
+                                </a>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
