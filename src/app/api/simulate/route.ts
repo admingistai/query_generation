@@ -1,5 +1,5 @@
 import { openai, type OpenAIResponsesProviderOptions } from "@ai-sdk/openai";
-import { streamText, tool, convertToModelMessages, generateText } from "ai";
+import { streamText, tool, convertToModelMessages, generateText, stepCountIs } from "ai";
 import { z } from "zod";
 import { createSimulatorSystemPrompt, JourneyPhase } from "@/lib/agents/userSimulatorAgent";
 
@@ -127,19 +127,34 @@ Phase guidance: ${phaseGuidance[phase]}`,
       system: createSimulatorSystemPrompt(icpPersona, initialQuery),
       messages: modelMessages,
       tools: simulationTools,
-      maxSteps: 10,
-      // Custom stop condition - only stop when activation is complete
-      stopWhen: ({ steps }) => {
-        const hasActivationCompletion = steps.some((step) =>
+      // Use stopWhen with stepCountIs as a safety limit (AI SDK v5 pattern)
+      // Combined with custom activation check via array of conditions
+      stopWhen: [
+        stepCountIs(10), // Safety limit
+        // Custom condition: stop when activation phase is complete
+        ({ steps }) => {
+          return steps.some((step) =>
+            step.toolResults?.some(
+              (r) =>
+                r.toolName === "recordPhaseCompletion" &&
+                (r.output as { phase?: string })?.phase === "activation"
+            )
+          );
+        },
+      ],
+      // Dynamic tool choice: required until activation complete, then auto
+      prepareStep: ({ steps }) => {
+        const hasActivation = steps.some((step) =>
           step.toolResults?.some(
-            (result) =>
-              result.toolName === "recordPhaseCompletion" &&
-              (result.result as { phase?: string })?.phase === "activation"
+            (r) =>
+              r.toolName === "recordPhaseCompletion" &&
+              (r.output as { phase?: string })?.phase === "activation"
           )
         );
-        return hasActivationCompletion;
+        return {
+          toolChoice: hasActivation ? undefined : ("required" as const),
+        };
       },
-      // Disable parallel tool calls to force sequential conversation
       providerOptions: {
         openai: {
           parallelToolCalls: false,
