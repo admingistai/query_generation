@@ -1,0 +1,6 @@
+{
+  "session_id": "50c4bb25-470f-461e-b795-c54f447a637e",
+  "prompts": [
+    "lets edit the proposal, I want to make sure that the 4x2 grid is itself a react component and I want it to have the component displayed on the demo page but have it so you can see all 8 phones on the screen without scrolling down. "
+  ]
+}
