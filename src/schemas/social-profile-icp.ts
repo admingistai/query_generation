@@ -23,6 +23,7 @@ export const EvidenceTypeSchema = z.enum([
   "comment",
   "bio",
   "comparable_creator",
+  "article", // NEW: Evidence from articles, interviews, press
 ]);
 
 export type EvidenceType = z.infer<typeof EvidenceTypeSchema>;
@@ -230,12 +231,102 @@ export const EvidenceBasedICPResultSchema = z.object({
 
 export type EvidenceBasedICPResult = z.infer<typeof EvidenceBasedICPResultSchema>;
 
-// API request schema for multi-URL input
+// ============================================================================
+// ARTICLE CONTEXT SCHEMAS
+// ============================================================================
+
+// Article source classification
+export const ArticleSourceTypeSchema = z.enum([
+  "interview",      // Q&A or interview format
+  "press",          // News coverage, announcements
+  "blog",           // Personal blog or guest posts
+  "podcast",        // Podcast transcript
+  "research",       // Industry research, reports
+  "other"           // Unclassified
+]);
+
+export type ArticleSourceType = z.infer<typeof ArticleSourceTypeSchema>;
+
+// Insight type for categorization
+export const ArticleInsightTypeSchema = z.enum([
+  "demographic",      // Age, gender, location, occupation
+  "psychographic",    // Values, interests, lifestyle
+  "behavioral",       // How they engage, purchase patterns
+  "brand_affinity",   // Brands mentioned
+  "niche_signal"      // Industry/niche indicators
+]);
+
+export type ArticleInsightType = z.infer<typeof ArticleInsightTypeSchema>;
+
+// Single insight extracted from article
+export const ArticleInsightSchema = z.object({
+  insight: z.string(),
+  confidence: ConfidenceLevelSchema,
+  quote: z.string().nullable(),        // Direct quote if available
+  insightType: ArticleInsightTypeSchema,
+});
+
+export type ArticleInsight = z.infer<typeof ArticleInsightSchema>;
+
+// Full article context extraction
+export const ArticleContextSchema = z.object({
+  sourceUrl: z.string(),
+  sourceTitle: z.string().nullable(),
+  sourceType: ArticleSourceTypeSchema,
+  publicationDate: z.string().nullable(),
+  extractedInsights: z.object({
+    demographics: z.array(ArticleInsightSchema),
+    psychographics: z.array(ArticleInsightSchema),
+    behaviorals: z.array(ArticleInsightSchema),
+    brandMentions: z.array(z.string()),
+    nicheSignals: z.array(z.string()),
+    creatorQuotes: z.array(z.string()),   // Creator's own words about audience
+    geographySignals: z.array(z.string()),
+  }),
+  qualityScore: z.number().min(0).max(5), // How valuable is this source?
+});
+
+export type ArticleContext = z.infer<typeof ArticleContextSchema>;
+
+// Research summary for preview (before user approval)
+export const ResearchSummarySchema = z.object({
+  profilesFound: z.array(z.object({
+    handle: z.string(),
+    platform: SocialPlatformSchema,
+    followerCount: z.string().nullable(),
+  })),
+  articlesProcessed: z.array(z.object({
+    url: z.string(),
+    title: z.string().nullable(),
+    sourceType: ArticleSourceTypeSchema,
+    qualityScore: z.number(),
+    insightCount: z.number(),
+  })),
+  keyInsights: z.array(z.string()), // Top insights for preview
+  discoveredUrls: z.object({
+    platforms: z.array(z.string()),
+    articles: z.array(z.string()), // Auto-discovered articles
+  }),
+  evidenceSummary: z.object({
+    totalSources: z.number(),
+    highConfidenceCount: z.number(),
+    hasCreatorQuotes: z.boolean(),
+  }),
+});
+
+export type ResearchSummary = z.infer<typeof ResearchSummarySchema>;
+
+// ============================================================================
+// API REQUEST/RESPONSE SCHEMAS
+// ============================================================================
+
+// API request schema for multi-URL input (with article support)
 export const EvidenceBasedICPRequestSchema = z.object({
   urls: z.union([
     z.string().url(),
     z.array(z.string().url()).min(1).max(5),
   ]),
+  articleUrls: z.array(z.string().url()).max(3).optional(), // NEW: Optional article URLs
   hints: z.object({
     creatorName: z.string().optional(),
     knownNiche: z.string().optional(),

@@ -6,7 +6,7 @@ import { useEffect, useMemo, useCallback, useState, useRef } from "react";
 import {
   Loader2, Search, Users, Sparkles, Instagram, Youtube, Linkedin, ExternalLink,
   ChevronDown, ChevronUp, AlertTriangle, CheckCircle2, HelpCircle, Filter, Globe, Hash, MessageSquare, UserCheck,
-  Plus, X, Link2
+  Plus, X, Link2, FileText
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -282,6 +282,21 @@ interface ValidateICPsPart {
     excludedCount: number;
     validSegments: EvidenceBasedICPSegment[];
     excludedSegments: ExcludedSegment[];
+  };
+}
+
+interface ExtractArticleContextPart {
+  type: "tool-extractArticleContext";
+  toolCallId: string;
+  state: "input-streaming" | "input-available" | "output-available" | "output-error";
+  input?: { articleUrl: string };
+  output?: {
+    sourceTitle: string | null;
+    sourceType: string;
+    insightCount: number;
+    qualityScore: number;
+    highlights: string[];
+    error?: string;
   };
 }
 
@@ -565,6 +580,28 @@ function ExcludedSegmentsSection({ segments }: { segments: ExcludedSegment[] }) 
   );
 }
 
+// Check if URL is a social platform URL
+const isSocialPlatformUrl = (url: string): boolean => {
+  const socialPatterns = [
+    /instagram\.com/i,
+    /tiktok\.com/i,
+    /twitter\.com|x\.com/i,
+    /youtube\.com/i,
+    /linkedin\.com/i,
+  ];
+  return socialPatterns.some(p => p.test(url));
+};
+
+// Check if URL is valid
+const isValidUrl = (url: string): boolean => {
+  try {
+    new URL(url);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 export function SocialProfileIcpGenerator() {
   // Multi-URL state
   const [profileUrls, setProfileUrls] = useState<string[]>([]);
@@ -574,6 +611,11 @@ export function SocialProfileIcpGenerator() {
   const [researchDepth, setResearchDepth] = useState<"quick" | "standard" | "deep">("standard");
   const [useV2, setUseV2] = useState(true); // Use v2 by default
   const hasStartedRef = useRef(false);
+
+  // Article URL state
+  const [articleUrls, setArticleUrls] = useState<string[]>([]);
+  const [articleInput, setArticleInput] = useState("");
+  const [articleError, setArticleError] = useState<string | null>(null);
 
   // Detect platform for current input
   const detectedPlatform = useMemo(() => detectPlatform(currentInput), [currentInput]);
@@ -607,9 +649,51 @@ export function SocialProfileIcpGenerator() {
     }
   }, [currentInput, detectedPlatform, handleAddUrl]);
 
+  // Add article URL to the list
+  const handleAddArticleUrl = useCallback(() => {
+    setArticleError(null);
+
+    if (!articleInput) return;
+    if (articleUrls.length >= 3) {
+      setArticleError("Maximum 3 articles allowed");
+      return;
+    }
+    if (articleUrls.includes(articleInput)) {
+      setArticleError("Article URL already added");
+      return;
+    }
+    if (!isValidUrl(articleInput)) {
+      setArticleError("Please enter a valid URL");
+      return;
+    }
+    if (isSocialPlatformUrl(articleInput)) {
+      setArticleError("Please enter an article URL, not a social profile. Use the field above for profile URLs.");
+      return;
+    }
+
+    setArticleUrls(prev => [...prev, articleInput]);
+    setArticleInput("");
+  }, [articleInput, articleUrls]);
+
+  // Remove article URL from list
+  const handleRemoveArticleUrl = useCallback((urlToRemove: string) => {
+    setArticleUrls(prev => prev.filter(url => url !== urlToRemove));
+  }, []);
+
+  // Handle Enter key to add article URL
+  const handleArticleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === "Enter" && articleInput) {
+      e.preventDefault();
+      handleAddArticleUrl();
+    }
+  }, [articleInput, handleAddArticleUrl]);
+
   // Primary URL for display and legacy support
   const primaryUrl = profileUrls[0] || "";
   const primaryPlatform = primaryUrl ? detectPlatform(primaryUrl) : null;
+
+  // Submitted article URLs (captured at generation time)
+  const [submittedArticleUrls, setSubmittedArticleUrls] = useState<string[]>([]);
 
   // Create transport for the appropriate endpoint
   const transport = useMemo(
@@ -619,12 +703,16 @@ export function SocialProfileIcpGenerator() {
         body: {
           // V2 supports array of URLs, V1 uses single profileUrl
           ...(useV2
-            ? { urls: submittedUrls, config: { researchDepth } }
+            ? {
+                urls: submittedUrls,
+                articleUrls: submittedArticleUrls.length > 0 ? submittedArticleUrls : undefined,
+                config: { researchDepth }
+              }
             : { profileUrl: submittedUrls[0] || "" }
           ),
         },
       }),
-    [submittedUrls, useV2, researchDepth]
+    [submittedUrls, submittedArticleUrls, useV2, researchDepth]
   );
 
   const chatId = useMemo(() => `social-icp-${useV2 ? "v2-" : ""}${submittedUrls.join("-") || 'new'}`, [submittedUrls, useV2]);
@@ -643,7 +731,8 @@ export function SocialProfileIcpGenerator() {
     hasStartedRef.current = true;
     setIsGenerating(true);
     setSubmittedUrls([...profileUrls]);
-  }, [profileUrls, primaryPlatform, isLoading]);
+    setSubmittedArticleUrls([...articleUrls]); // Capture article URLs at generation time
+  }, [profileUrls, articleUrls, primaryPlatform, isLoading]);
 
   useEffect(() => {
     if (submittedUrls.length > 0 && isGenerating && hasStartedRef.current && messages.length === 0) {
@@ -660,6 +749,7 @@ export function SocialProfileIcpGenerator() {
   useEffect(() => {
     if (submittedUrls.length > 0 && JSON.stringify(profileUrls) !== JSON.stringify(submittedUrls)) {
       setSubmittedUrls([]);
+      setSubmittedArticleUrls([]);
       setMessages([]);
       setIsGenerating(false);
       hasStartedRef.current = false;
@@ -878,6 +968,88 @@ export function SocialProfileIcpGenerator() {
               V2: Add up to 5 URLs (same creator, different platforms) for richer evidence
             </p>
           )}
+
+          {/* Article URL Input Section (V2 only) */}
+          {useV2 && profileUrls.length > 0 && (
+            <div className="mt-4 pt-4 border-t border-dashed space-y-3">
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <FileText className="w-4 h-4" />
+                <span>Add article context (optional)</span>
+                <Badge variant="outline" className="text-xs">New</Badge>
+              </div>
+
+              {/* Added article URLs display */}
+              {articleUrls.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {articleUrls.map((url) => (
+                    <div
+                      key={url}
+                      className="flex items-center gap-2 bg-amber-500/10 border border-amber-500/20 rounded-full px-3 py-1.5 text-sm"
+                    >
+                      <FileText className="w-4 h-4 text-amber-500" />
+                      <span className="max-w-[200px] truncate text-amber-700 dark:text-amber-400">
+                        {url.replace(/^https?:\/\/(www\.)?/, "").split("/")[0]}
+                      </span>
+                      <button
+                        onClick={() => handleRemoveArticleUrl(url)}
+                        className="text-amber-500 hover:text-amber-700 transition-colors"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ))}
+                  {articleUrls.length < 3 && (
+                    <div className="text-xs text-muted-foreground self-center">
+                      {3 - articleUrls.length} more article{3 - articleUrls.length !== 1 ? "s" : ""} allowed
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Article URL input */}
+              {articleUrls.length < 3 && (
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <div className="absolute left-3 top-1/2 -translate-y-1/2">
+                      <FileText className="w-4 h-4 text-amber-500" />
+                    </div>
+                    <Input
+                      type="url"
+                      placeholder="Paste interview, press article, or blog URL about the creator"
+                      value={articleInput}
+                      onChange={(e) => {
+                        setArticleInput(e.target.value);
+                        setArticleError(null);
+                      }}
+                      onKeyDown={handleArticleKeyDown}
+                      className="pl-10"
+                      disabled={isLoading}
+                    />
+                  </div>
+                  <Button
+                    variant="outline"
+                    onClick={handleAddArticleUrl}
+                    disabled={isLoading || !articleInput}
+                  >
+                    <Plus className="w-4 h-4 mr-1" />
+                    Add Article
+                  </Button>
+                </div>
+              )}
+
+              {/* Article error */}
+              {articleError && (
+                <p className="text-sm text-destructive">{articleError}</p>
+              )}
+
+              {/* Article hint */}
+              {articleUrls.length === 0 && !articleInput && (
+                <p className="text-xs text-muted-foreground">
+                  Add interviews, press articles, or blog posts about the creator for higher confidence ICPs with direct quotes.
+                </p>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
@@ -920,6 +1092,7 @@ export function SocialProfileIcpGenerator() {
                 // V2 tool parts
                 const expandParts = parts.filter((p) => p.type === "tool-expandUrls") as unknown as ExpandUrlsPart[];
                 const researchParts = parts.filter((p) => p.type === "tool-deepResearch") as unknown as DeepResearchPart[];
+                const articleParts = parts.filter((p) => p.type === "tool-extractArticleContext") as unknown as ExtractArticleContextPart[];
                 const nicheParts = parts.filter((p) => p.type === "tool-classifyNiche") as unknown as ClassifyNichePart[];
                 const compareParts = parts.filter((p) => p.type === "tool-findComparableCreators") as unknown as FindComparableCreatorsPart[];
                 const generateV2Parts = parts.filter((p) => p.type === "tool-generateEvidenceBasedICPs") as unknown as GenerateEvidenceBasedICPsPart[];
@@ -1035,6 +1208,54 @@ export function SocialProfileIcpGenerator() {
                                   {part.output.evidenceSummary.geographySignalCount} geo signals
                                 </Badge>
                               </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+
+                    {/* V2: Article Extraction */}
+                    {articleParts.map((part, idx) => (
+                      <div key={`article-${idx}`} className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-3">
+                        <div className="flex items-center gap-2 text-xs text-amber-500 font-medium">
+                          <FileText className="w-3 h-3" />
+                          <span>Extracting article insights</span>
+                          {part.state !== "output-available" && (
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                          )}
+                        </div>
+                        {part.input?.articleUrl && (
+                          <p className="mt-1 text-xs text-muted-foreground truncate">
+                            {part.input.articleUrl.replace(/^https?:\/\/(www\.)?/, "").substring(0, 50)}...
+                          </p>
+                        )}
+                        {part.state === "output-available" && part.output && (
+                          <div className="mt-2">
+                            <p className="text-sm font-medium text-amber-600 dark:text-amber-400">
+                              {part.output.sourceTitle || "Article"}
+                            </p>
+                            <div className="flex flex-wrap gap-2 mt-1">
+                              <Badge variant="secondary" className="text-xs">
+                                {part.output.sourceType}
+                              </Badge>
+                              <Badge variant="secondary" className="text-xs">
+                                {part.output.insightCount} insights
+                              </Badge>
+                              <Badge variant="secondary" className="text-xs">
+                                Quality: {part.output.qualityScore}/5
+                              </Badge>
+                            </div>
+                            {part.output.highlights && part.output.highlights.length > 0 && (
+                              <div className="mt-2 space-y-1">
+                                {part.output.highlights.slice(0, 2).map((h, i) => (
+                                  <p key={i} className="text-xs text-amber-600/80 dark:text-amber-400/80 italic">
+                                    &ldquo;{h}&rdquo;
+                                  </p>
+                                ))}
+                              </div>
+                            )}
+                            {part.output.error && (
+                              <p className="text-xs text-destructive mt-1">{part.output.error}</p>
                             )}
                           </div>
                         )}
